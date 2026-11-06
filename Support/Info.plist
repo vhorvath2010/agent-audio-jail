@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.vhorvath2010.agent-audio-jail</string>
+    <key>CFBundleName</key>
+    <string>AgentAudioJail</string>
+    <key>CFBundleExecutable</key>
+    <string>agent-audio-jail</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.2</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>AgentAudioJail mutes audio played by coding agents and saves it so the agent can inspect it.</string>
+</dict>
+</plist>
