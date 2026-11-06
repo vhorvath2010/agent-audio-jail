@@ -60,7 +60,8 @@ func loadStatus(_ paths: StatePaths) -> StatusFile {
 
 func describe(_ session: StatusFile.Session) -> String {
     let state = !session.isTapActive ? "idle" : (session.isMuted ? "muted" : "AUDIBLE")
-    var lines = ["\(session.session)  [\(state)]  \(session.rootCommand)"]
+    let playing = session.isPlayingNow ? ", playing now" : ""
+    var lines = ["\(session.session)  [\(state)\(playing)]  \(session.rootCommand) in \(session.label)"]
     for process in session.processes {
         let playing = process.isRunningOutput ? "  (playing)" : ""
         lines.append("    pid \(process.pid)  \(process.name)\(playing)")
@@ -80,10 +81,8 @@ func printJSON<Value: Encodable>(_ value: Value) {
 }
 
 func updateControl(_ paths: StatePaths, _ change: (inout ControlFile) -> Void) {
-    var control = readJSON(ControlFile.self, from: paths.control) ?? ControlFile()
-    change(&control)
     do {
-        try writeJSON(control, to: paths.control)
+        try updateControlFile(paths, change)
     } catch {
         fail("could not write \(paths.control.path): \(error)")
     }
@@ -97,10 +96,14 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 let paths = StatePaths.resolve()
 let wantsJSON = arguments.contains("--json")
 
-switch arguments.first {
+/// Opening AgentAudioJail.app from Finder or Spotlight passes no arguments and the parent is launchd;
+/// treat that as `run`. A bare `agent-audio-jail` typed in a shell still prints the usage.
+let isLaunchedAsApp = arguments.isEmpty && getppid() == 1
+
+switch isLaunchedAsApp ? "run" : arguments.first {
 case "run":
     let daemon = Daemon(options: parseDaemonOptions(Array(arguments.dropFirst())), paths: paths)
-    daemon.run()
+    MainActor.assumeIsolated { runMenuBarApp(daemon: daemon) }
 
 case "status":
     let status = loadStatus(paths)

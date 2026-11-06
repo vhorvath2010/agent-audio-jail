@@ -22,13 +22,40 @@ cd agent-audio-jail
 ```
 
 This builds `AgentAudioJail.app` into `~/Applications`, links the CLI to
-`~/.local/bin/agent-audio-jail`, and starts a LaunchAgent. macOS asks once for
-**System Audio Recording** permission. The app is ad-hoc signed, so it asks again after
-every rebuild. Requires Xcode or the Command Line Tools.
+`~/.local/bin/agent-audio-jail`, and starts a LaunchAgent. macOS asks for
+**System Audio Recording** permission, and the jail can't do anything until you click
+Allow. The app is ad-hoc signed, so macOS asks again after every rebuild. Requires Xcode
+or the Command Line Tools.
 
 `./scripts/uninstall.sh` removes it.
 
-## Use
+## Knowing what's muted, and unmuting it
+
+A muted page looks broken unless you know the jail exists, so the app tells you:
+
+- **A bar on the muted window.** While an agent-started app is playing sound, every
+  window it owns gets a bar along the bottom: "Audio muted by Agent Audio Jail: started by
+  claude in my-app", with an **Unmute** button. After you unmute, the bar stays and offers
+  **Mute**. It follows the window as you drag it. Because it's a separate window from
+  another app, it can trail by about a frame. It only needs the window's position, so it
+  doesn't need Screen Recording permission.
+- **Menu bar icon.** A crossed-out speaker means the jail is running. It turns filled,
+  with a count, while it's muting agent audio *right now*; hover over it to see which agent.
+  The menu lists each agent session by its project folder (for example
+  "claude in my-app: muted, playing now") and the process making the sound. Each session
+  has **Unmute This Agent** / **Mute Again** and **Show Muted Clips in Finder**. The menu
+  also has **Pause: Let All Agent Audio Through** and **Quit**.
+- **Notification.** The first time a session is muted you get one notification, such
+  as "Muted audio from claude in my-app", with an **Unmute** button. You get one per
+  agent session, so test runs don't spam you. Turn it off from the menu. In testing,
+  macOS refused notifications for an ad-hoc signed build without ever asking; the bar
+  and the menu bar icon still work without them.
+
+Unmuting applies to the whole agent session (everything that agent started) until you
+mute it again or the agent exits. Quit keeps it stopped. Open AgentAudioJail from
+Spotlight to start it again.
+
+## Command line
 
 ```
 agent-audio-jail status          # every session that has played audio
@@ -82,7 +109,7 @@ To change the LaunchAgent's arguments, edit `~/Library/LaunchAgents/io.github.vh
 - Embedded browser panes inside an agent's desktop app run in that app's own helper
   processes. Jail them with `--bundle <the app's bundle ID>`. That also mutes anything
   else the app plays.
-- The daemon state lives in `~/.agent-audio-jail` (override with `AGENT_AUDIO_JAIL_HOME`).
+- State lives in `~/.agent-audio-jail` (override with `AGENT_AUDIO_JAIL_HOME`).
 
 ## License
 

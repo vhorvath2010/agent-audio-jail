@@ -11,16 +11,18 @@ final class AgentSession {
     let key: String
     let rootPID: pid_t?
     let rootCommand: String
+    let label: String
     let directory: URL
     let recorder: ClipRecorder
     let queue: DispatchQueue
     private(set) var tap: SessionTap?
     private var lastError: String?
 
-    init(key: String, rootPID: pid_t?, rootCommand: String, directory: URL) {
+    init(key: String, rootPID: pid_t?, rootCommand: String, label: String, directory: URL) {
         self.key = key
         self.rootPID = rootPID
         self.rootCommand = rootCommand
+        self.label = label
         self.directory = directory
         self.recorder = ClipRecorder(directory: directory)
         self.queue = DispatchQueue(label: "agent-audio-jail.\(key)")
@@ -63,6 +65,8 @@ final class AgentSession {
 }
 
 final class Daemon {
+    static let playingNowWindow: TimeInterval = 3
+
     private let options: DaemonOptions
     private let paths: StatePaths
     private let ownPID = getpid()
@@ -77,7 +81,15 @@ final class Daemon {
         self.paths = paths
     }
 
-    func run() -> Never {
+    /// Called on the main queue after every reconcile.
+    var onStatusChange: ((StatusFile) -> Void)?
+
+    /// Starts listening and reconciling on the main queue; the caller runs the main run loop.
+    func start() {
+        guard acquireSingleInstanceLock() else {
+            log("another agent-audio-jail daemon is already running")
+            exit(0)
+        }
         try? FileManager.default.removeItem(at: paths.sessions)
         log("agent-audio-jail \(ownPID) jailing descendants of \(options.agentNames.sorted().joined(separator: ", "))"
             + (options.bundlePrefixes.isEmpty ? "" : " and bundles \(options.bundlePrefixes.joined(separator: ", "))"))
@@ -107,8 +119,49 @@ final class Daemon {
             source.resume()
             retainedSources.append(source)
         }
+    }
 
-        dispatchMain()
+    func setAudible(_ sessionKey: String, _ isAudible: Bool) {
+        changeControl { control in
+            control.audibleSessions.removeAll { $0 == sessionKey }
+            if isAudible { control.audibleSessions.append(sessionKey) }
+        }
+    }
+
+    func setPaused(_ isPaused: Bool) {
+        changeControl { $0.isPaused = isPaused }
+    }
+
+    func setNotificationsEnabled(_ isEnabled: Bool) {
+        changeControl { $0.areNotificationsEnabled = isEnabled }
+    }
+
+    func readControl() -> ControlFile {
+        readJSON(ControlFile.self, from: paths.control) ?? ControlFile()
+    }
+
+    func shutDown() -> Never {
+        log("shutting down; releasing all taps")
+        for session in sessions.values {
+            session.stopTap()
+        }
+        try? FileManager.default.removeItem(at: paths.status)
+        exit(0)
+    }
+
+    private func changeControl(_ change: (inout ControlFile) -> Void) {
+        do {
+            try updateControlFile(paths, change)
+        } catch {
+            log("could not write control file: \(error)")
+        }
+        reconcile()
+    }
+
+    private func acquireSingleInstanceLock() -> Bool {
+        try? FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+        let descriptor = open(paths.root.appendingPathComponent("daemon.lock").path, O_CREAT | O_RDWR, 0o600)
+        return descriptor >= 0 && flock(descriptor, LOCK_EX | LOCK_NB) == 0
     }
 
     private func reconcile() {
@@ -139,15 +192,20 @@ final class Daemon {
             }
         }
 
+        var endedSessionKeys: [String] = []
         for (key, session) in sessions where grouped[key] == nil {
             session.stopTap()
             if !session.isRootAlive {
                 try? FileManager.default.removeItem(at: session.directory)
                 sessions[key] = nil
+                endedSessionKeys.append(key)
             }
         }
+        if control.audibleSessions.contains(where: endedSessionKeys.contains) {
+            try? updateControlFile(paths) { $0.audibleSessions.removeAll(where: endedSessionKeys.contains) }
+        }
 
-        writeStatus()
+        onStatusChange?(writeStatus())
     }
 
     private func rebuildAllTaps() {
@@ -173,12 +231,19 @@ final class Daemon {
     private func makeSession(key: String, sample: AudioClient) -> AgentSession {
         if key.hasPrefix("pid-"), let rootPID = pid_t(key.dropFirst(4)) {
             let command = readExecutableName(of: rootPID) ?? "unknown"
-            return AgentSession(key: key, rootPID: rootPID, rootCommand: command, directory: paths.sessionDirectory(key))
+            let folder = readWorkingDirectory(of: rootPID).map { URL(fileURLWithPath: $0).lastPathComponent } ?? key
+            return AgentSession(
+                key: key, rootPID: rootPID, rootCommand: command, label: folder, directory: paths.sessionDirectory(key)
+            )
         }
-        return AgentSession(key: key, rootPID: nil, rootCommand: sample.bundleID, directory: paths.sessionDirectory(key))
+        return AgentSession(
+            key: key, rootPID: nil, rootCommand: sample.bundleID, label: sample.bundleID, directory: paths.sessionDirectory(key)
+        )
     }
 
-    private func writeStatus() {
+    @discardableResult
+    private func writeStatus() -> StatusFile {
+        let now = Date()
         let sessionStatuses = sessions.values.sorted { $0.key < $1.key }.map { session in
             let summary = session.recorder.summarize()
             let processes = (clientsBySession[session.key] ?? []).map { client in
@@ -190,12 +255,16 @@ final class Daemon {
                 )
             }
             let peak = session.tap == nil ? 0 : summary.lastPeak
+            let isPlayingNow = session.tap != nil
+                && summary.lastSoundAt.map { now.timeIntervalSince($0) < Self.playingNowWindow } == true
             return StatusFile.Session(
                 session: session.key,
+                label: session.label,
                 rootPID: session.rootPID,
                 rootCommand: session.rootCommand,
                 isMuted: session.tap?.isMuted ?? false,
                 isTapActive: session.tap != nil,
+                isPlayingNow: isPlayingNow,
                 processes: processes,
                 lastSoundAt: summary.lastSoundAt,
                 lastPeakDBFS: (20 * log10(Double(max(peak, 1e-6))) * 10).rounded() / 10,
@@ -203,20 +272,12 @@ final class Daemon {
                 clips: summary.clipPaths
             )
         }
-        let status = StatusFile(daemonPID: ownPID, updatedAt: Date(), isPaused: isPaused, sessions: sessionStatuses)
+        let status = StatusFile(daemonPID: ownPID, updatedAt: now, isPaused: isPaused, sessions: sessionStatuses)
         do {
             try writeJSON(status, to: paths.status)
         } catch {
             log("could not write status: \(error)")
         }
-    }
-
-    private func shutDown() -> Never {
-        log("shutting down; releasing all taps")
-        for session in sessions.values {
-            session.stopTap()
-        }
-        try? FileManager.default.removeItem(at: paths.status)
-        exit(0)
+        return status
     }
 }

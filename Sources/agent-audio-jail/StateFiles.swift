@@ -1,19 +1,38 @@
 import Foundation
 
-/// Written by the CLI, read by the daemon on every reconcile.
+/// Written by the CLI and the menu bar, read by the daemon on every reconcile.
 struct ControlFile: Codable {
     var isPaused = false
     var audibleSessions: [String] = []
+    var areNotificationsEnabled = true
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
+        audibleSessions = try container.decodeIfPresent([String].self, forKey: .audibleSessions) ?? []
+        areNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .areNotificationsEnabled) ?? true
+    }
+}
+
+func updateControlFile(_ paths: StatePaths, _ change: (inout ControlFile) -> Void) throws {
+    var control = readJSON(ControlFile.self, from: paths.control) ?? ControlFile()
+    change(&control)
+    try writeJSON(control, to: paths.control)
 }
 
 /// Written by the daemon every second, read by the CLI and by agents.
 struct StatusFile: Codable {
     struct Session: Codable {
         let session: String
+        /// Human-readable name: the agent's working-directory name, or the jailed bundle ID.
+        let label: String
         let rootPID: Int32?
         let rootCommand: String
         let isMuted: Bool
         let isTapActive: Bool
+        let isPlayingNow: Bool
         let processes: [Process]
         let lastSoundAt: Date?
         let lastPeakDBFS: Double

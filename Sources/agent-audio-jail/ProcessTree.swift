@@ -35,3 +35,12 @@ func findAgentRoot(of pid: pid_t, agentNames: Set<String>) -> pid_t? {
     }
     return nil
 }
+
+func readWorkingDirectory(of pid: pid_t) -> String? {
+    var info = proc_vnodepathinfo()
+    let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+    return withUnsafeBytes(of: &info.pvi_cdir.vip_path) { bytes in
+        String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+    }
+}
