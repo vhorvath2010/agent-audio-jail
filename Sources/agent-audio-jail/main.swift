@@ -10,7 +10,8 @@ as WAV clips that the agent can inspect.
 USAGE
   agent-audio-jail run [--agent NAME]... [--bundle PREFIX]...
       Run the daemon (normally started by the LaunchAgent).
-      --agent NAME     Treat processes named NAME as agent roots (default: claude, codex).
+      --agent NAME     Treat processes named NAME as agent roots (default: claude, codex,
+                       and agent-browser's daemon).
                        Passing --agent replaces the defaults.
       --bundle PREFIX  Also jail audio clients whose bundle ID starts with PREFIX.
 

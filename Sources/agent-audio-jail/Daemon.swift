@@ -2,7 +2,8 @@ import CoreAudio
 import Foundation
 
 struct DaemonOptions {
-    var agentNames: Set<String> = ["claude", "codex"]
+    /// agent-browser's daemon detaches to launchd, so the browser it starts has no `claude` ancestor.
+    var agentNames: Set<String> = ["claude", "codex", "agent-browser-darwin-arm64", "agent-browser-darwin-x64"]
     var bundlePrefixes: [String] = []
 }
 
@@ -230,7 +231,8 @@ final class Daemon {
 
     private func makeSession(key: String, sample: AudioClient) -> AgentSession {
         if key.hasPrefix("pid-"), let rootPID = pid_t(key.dropFirst(4)) {
-            let command = readExecutableName(of: rootPID) ?? "unknown"
+            let command = (readExecutableName(of: rootPID) ?? "unknown")
+                .replacingOccurrences(of: #"-darwin-(arm64|x64)$"#, with: "", options: .regularExpression)
             let folder = readWorkingDirectory(of: rootPID).map { URL(fileURLWithPath: $0).lastPathComponent } ?? key
             return AgentSession(
                 key: key, rootPID: rootPID, rootCommand: command, label: folder, directory: paths.sessionDirectory(key)

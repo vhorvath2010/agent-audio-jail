@@ -103,7 +103,9 @@ To change the LaunchAgent's arguments, edit `~/Library/LaunchAgents/io.github.vh
 - **Only processes started by an agent are covered.** An agent that drives a browser
   you started yourself (for example through a Chrome extension) plays through *your*
   browser, which is not jailed. The same goes for processes that detach and are
-  re-parented to `launchd`.
+  re-parented to `launchd`. [agent-browser](https://github.com/vercel-labs/agent-browser)
+  does this, so its daemon counts as an agent root by default; its sessions are labeled
+  "agent-browser in <folder>". Add other detaching tools with `--agent`.
 - **A process can be audible for a few milliseconds** between connecting to Core Audio
   and its tap being created. In practice the tap is in place before playback starts.
 - Embedded browser panes inside an agent's desktop app run in that app's own helper
